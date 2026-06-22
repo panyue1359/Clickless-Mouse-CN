@@ -81,7 +81,13 @@ Project layout:
 
 ## Screenshot
 
-![Main window](https://raw.githubusercontent.com/ProperCode/Clickless-Mouse/master/other/images/2en.jpg)
+English UI:
+
+![English UI screenshot](./other/images/2en.jpg)
+
+Chinese UI:
+
+![Chinese UI screenshot](./other/images/2zh.jpg)
 
 ## Awards
 [![Softpedia Clean Award](https://raw.githubusercontent.com/ProperCode/Clickless-Mouse/master/other/awards/softpedia_100_free.png)](https://www.softpedia.com/get/Desktop-Enhancements/Other-Desktop-Enhancements/Clickless-Mouse.shtml#status)

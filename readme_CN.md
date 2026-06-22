@@ -81,7 +81,13 @@ Clickless Mouse 是一个 Windows 桌面应用，允许用户仅通过移动鼠�
 
 ## 截图
 
-![主窗口](https://raw.githubusercontent.com/ProperCode/Clickless-Mouse/master/other/images/2en.jpg)
+英文界面：
+
+![英文界面截图](./other/images/2en.jpg)
+
+中文界面：
+
+![中文界面截图](./other/images/2zh.jpg)
 
 ## 奖项
 [![Softpedia Clean Award](https://raw.githubusercontent.com/ProperCode/Clickless-Mouse/master/other/awards/softpedia_100_free.png)](https://www.softpedia.com/get/Desktop-Enhancements/Other-Desktop-Enhancements/Clickless-Mouse.shtml#status)
