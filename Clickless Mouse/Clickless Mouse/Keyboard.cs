@@ -14,6 +14,7 @@ namespace Clickless_Mouse
             if (async)
             {
                 THRkeymaster = new Thread(() => key_press(vkc, down_ms));
+                THRkeymaster.IsBackground = true;
                 THRkeymaster.Start();
             }
             else

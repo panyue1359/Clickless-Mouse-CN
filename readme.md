@@ -5,7 +5,7 @@
 
 Version in this repository: `2.2`
 
-**Languages:** English, Polish
+**Languages:** English, Polish, Chinese
 
 ## Description
 
@@ -27,6 +27,8 @@ Additional behavior in the current codebase:
 - If the cursor is near the left or right edge, square size is reduced so part of each square remains visible.
 - Unneeded squares can be disabled.
 - Screen panning can map screen edges to arrow-key presses.
+- Left and right button hold actions can be configured to release automatically after the cursor stops for a short time.
+- A small red overlay dot indicates when the app is currently holding a mouse button down.
 - Automatic update checks are available in version `2.2`.
 - The app works only in windowed or borderless applications. Exclusive fullscreen is not supported.
 
@@ -38,6 +40,7 @@ Additional behavior in the current codebase:
 
 Lowest accepted values enforced by the program:
 - Cursor idle time before squares appear [ms]: `100`
+- Hold release delay after stop [ms]: `10`
 - Time to start mouse movement after squares appear [ms]: `300`
 - Cursor time in square to register click [ms]: `10`
 - Size [px]: `10`
@@ -52,6 +55,8 @@ Lowest accepted values enforced by the program:
 
 Settings are stored next to the executable in `settings.txt`. Enabling startup also generates a sibling `.vbs` launcher used by the app's autorun entry.
 
+The settings file is backward-compatible with older installs. Newer builds append hold-release options and the selected UI language after the existing values.
+
 ## Build
 
 Open `Clickless Mouse/Clickless Mouse.sln` in Visual Studio and build the `Clickless Mouse` project for `Debug` or `Release`.
@@ -59,6 +64,7 @@ Open `Clickless Mouse/Clickless Mouse.sln` in Visual Studio and build the `Click
 Project layout:
 - `Clickless Mouse/Clickless Mouse.sln` - Visual Studio solution
 - `Clickless Mouse/Clickless Mouse/` - WPF application source
+- `Clickless Mouse/Clickless Mouse/HoldIndicator.cs` - WinForms overlay used to show active hold state
 - `other/latest_version.txt` - remote version marker used by update checks
 - `other/images/` - README and in-app documentation assets
 

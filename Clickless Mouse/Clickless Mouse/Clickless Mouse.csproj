@@ -67,6 +67,12 @@
     </ApplicationDefinition>
     <Compile Include="Keyboard.cs" />
     <Compile Include="Language.cs" />
+    <Compile Include="HoldIndicator.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="HoldIndicator.designer.cs">
+      <DependentUpon>HoldIndicator.cs</DependentUpon>
+    </Compile>
     <Compile Include="Mouse.cs" />
     <Compile Include="Square.cs">
       <SubType>Form</SubType>

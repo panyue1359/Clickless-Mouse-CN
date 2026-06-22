@@ -47,12 +47,19 @@ namespace Clickless_Mouse
         const int default_min_square_size_percents = 60;
         const int lowest_min_square_size_percents = 10;
         const int loop_time_ms = 10; //how often is cursor position checked (10ms recommended)
+        const int default_hold_release_delay_after_stop_ms = 300;
+        const int lowest_hold_release_delay_after_stop_ms = 10;
+        const int hold_indicator_diameter = 8;
+        const int hold_indicator_offset_x = -10;
+        const int hold_indicator_offset_y = -10;
                                      //changing this requires changing default and lowest:
                                      //cursor_idle_time_ms, time_to_start_mouse_movement_ms
                                      //and cursor_time_in_square_ms
 
         int cursor_idle_time_ms; //idle time before squares appear
         int loops_to_show_squares_after_cursor_idle;
+        int hold_release_delay_after_stop_ms;
+        int loops_to_release_hold_after_stop;
         int time_to_start_mouse_movement_ms; //time to start mouse movement after squares appear, 
                                          //before they disappear (700 default, lowest reasonable 500)
         int loops_to_start_mouse_movement;
@@ -76,9 +83,13 @@ namespace Clickless_Mouse
         string settings_filename = "settings.txt";
 
         Square SL, SR, SM, SLH, SRH;
+        HoldIndicator holdIndicator;
         DateTime last_click_time;
         Thread THRmouse_monitor, THRsquares_monitor, THRmouse_monitor2;
         int displacement = 0;
+        volatile bool is_shutting_down = false;
+        volatile bool suppress_automatic_update_check = false;
+        int squares_monitor_session_id = 0;
         
         bool saving_enabled = false;
         //full path is necessary if run at startup is used (running at startup uses different current
@@ -110,9 +121,17 @@ namespace Clickless_Mouse
 
             CultureInfo ci = CultureInfo.InstalledUICulture;
 
-            if (ci.DisplayName.ToLower().Contains("polski") || ci.Name.ToLower().Contains("pl-pl"))
+            string displayName = ci.DisplayName.ToLowerInvariant();
+            string cultureName = ci.Name.ToLowerInvariant();
+
+            if (displayName.Contains("polski") || cultureName.Contains("pl"))
             {
                 lang = language.pl;
+            }
+            else if (displayName.Contains("chinese") || displayName.Contains("中文")
+                || cultureName.StartsWith("zh"))
+            {
+                lang = language.zh;
             }
             else lang = language.en;
 
@@ -129,6 +148,7 @@ namespace Clickless_Mouse
             saving_enabled = true;
 
             regenerate_squares();            
+            regenerate_hold_indicator();
 
             if (loading_error)
             {
@@ -156,6 +176,7 @@ namespace Clickless_Mouse
 
             THRmouse_monitor = new Thread(new ThreadStart(monitor_mouse));
             THRmouse_monitor.Priority = ThreadPriority.Highest;
+            THRmouse_monitor.IsBackground = true;
             THRmouse_monitor.Start();
         }
 
@@ -195,6 +216,10 @@ namespace Clickless_Mouse
         {
             if (cursor_idle_time_ms < lowest_cursor_idle_time_ms)
                 TBcursor_idle_before_squares_appear.Text = lowest_cursor_idle_time_ms.ToString();
+
+            if (hold_release_delay_after_stop_ms < lowest_hold_release_delay_after_stop_ms)
+                TBhold_release_delay_after_stop.Text =
+                    lowest_hold_release_delay_after_stop_ms.ToString();
 
             if (time_to_start_mouse_movement_ms < lowest_time_to_start_mouse_movement_ms)
                 TBtime_to_start_mouse.Text = lowest_time_to_start_mouse_movement_ms.ToString();
@@ -238,6 +263,7 @@ namespace Clickless_Mouse
             CHBcheck_for_updates_CheckedChanged(null, null);
 
             TBcursor_idle_before_squares_appear.Text = default_cursor_idle_time_ms.ToString();
+            TBhold_release_delay_after_stop.Text = default_hold_release_delay_after_stop_ms.ToString();
             TBtime_to_start_mouse.Text = default_time_to_start_mouse_movement_ms.ToString();
             TBcursor_time_in_square.Text = default_cursor_time_in_square_ms.ToString();
 
@@ -245,6 +271,10 @@ namespace Clickless_Mouse
             CHBstart_minimized.IsChecked = false;
             CHBminimize_to_tray.IsChecked = false;
             CHBcheck_for_updates.IsChecked = false;
+            CHBlmb_hold_release_after_stop.IsChecked = true;
+            should_release_lmb_hold_after_next_stop = true;
+            CHBrmb_hold_release_after_stop.IsChecked = true;
+            should_release_rmb_hold_after_next_stop = true;
 
             TBsquare_size.Text = default_size.ToString();
             TBsquare_border.Text = default_border_width.ToString();
@@ -328,7 +358,7 @@ namespace Clickless_Mouse
             bool pressed_up, pressed_left, pressed_down, pressed_right;
             pressed_up = pressed_left = pressed_down = pressed_right = false;
 
-            while (true)
+            while (screen_panning && is_shutting_down == false)
             {
                 //user may change screen resolution so max_x and max_y should be updated
                 max_x = Screen.PrimaryScreen.Bounds.Width - 1;
@@ -378,12 +408,21 @@ namespace Clickless_Mouse
                 }
                 else if (y1 != max_y && pressed_down == true)
                 {
-                    key_down(VirtualKeyCode.DOWN);
+                    key_up(VirtualKeyCode.DOWN);
                     pressed_down = false;
                 }
 
                 real_sleep(50);
             }
+
+            if (pressed_left)
+                key_up(VirtualKeyCode.LEFT);
+            if (pressed_right)
+                key_up(VirtualKeyCode.RIGHT);
+            if (pressed_up)
+                key_up(VirtualKeyCode.UP);
+            if (pressed_down)
+                key_up(VirtualKeyCode.DOWN);
         }
 
         void calculate_squares_start_positions()
@@ -420,18 +459,27 @@ namespace Clickless_Mouse
         int banned_x = -1;
         int banned_y = -1;
         int previous_size = 0;
+        bool waiting_to_release_hold_after_stop()
+        {
+            return (should_release_lmb_hold_after_next_stop
+                    && app_left_hold_active && app_left_hold_waiting_for_release_after_move)
+                || (should_release_rmb_hold_after_next_stop
+                    && app_right_hold_active && app_right_hold_waiting_for_release_after_move);
+        }
+
         void monitor_mouse()
         {
             int i = 0;
             int x1 = 0, x2 = 0, y1 = 0, y2 = 0;
 
-            while (true)
+            while (is_shutting_down == false)
             {
                 x1 = System.Windows.Forms.Cursor.Position.X;
                 y1 = System.Windows.Forms.Cursor.Position.Y;
                 Thread.Sleep(loop_time_ms);
                 x2 = System.Windows.Forms.Cursor.Position.X;
                 y2 = System.Windows.Forms.Cursor.Position.Y;
+                update_hold_indicator_position(x2, y2);
 
                 //max_x and max_y are updated in monitor_mouse2 by THRmouse_monitor2 which works
                 //only when screen_panning == true
@@ -447,16 +495,54 @@ namespace Clickless_Mouse
                     if (x1 != banned_x || y1 != banned_y)
                     {
                         i++;
+
+                        if (should_release_lmb_hold_after_next_stop
+                            && app_left_hold_active && app_left_hold_waiting_for_release_after_move
+                            && i > loops_to_show_squares_after_cursor_idle
+                                + loops_to_release_hold_after_stop)
+                        {
+                            left_up();
+                            last_click_time = DateTime.Now;
+                            banned_x = x2;
+                            banned_y = y2;
+                            i = 0;
+                            continue;
+                        }
+
+                        if (should_release_rmb_hold_after_next_stop
+                            && app_right_hold_active && app_right_hold_waiting_for_release_after_move
+                            && i > loops_to_show_squares_after_cursor_idle
+                                + loops_to_release_hold_after_stop)
+                        {
+                            right_up();
+                            last_click_time = DateTime.Now;
+                            banned_x = x2;
+                            banned_y = y2;
+                            i = 0;
+                            continue;
+                        }
                     }
                 }
                 else
                 {
+                    if (should_release_lmb_hold_after_next_stop && app_left_hold_active)
+                    {
+                        app_left_hold_waiting_for_release_after_move = true;
+                    }
+
+                    if (should_release_rmb_hold_after_next_stop && app_right_hold_active)
+                    {
+                        app_right_hold_waiting_for_release_after_move = true;
+                    }
+
                     banned_x = -1;
                     banned_y = -1;
                     i = 0;
                     mouse_move_detected();
                 }
-                if (i > loops_to_show_squares_after_cursor_idle && squares_visible == false)
+                if (i > loops_to_show_squares_after_cursor_idle
+                    && squares_visible == false
+                    && waiting_to_release_hold_after_stop() == false)
                 {
                     x = x2;
                     y = y2;
@@ -617,6 +703,8 @@ namespace Clickless_Mouse
 
                         THRsquares_monitor = new Thread(new ThreadStart(monitor_squares));
                         THRsquares_monitor.Priority = ThreadPriority.Highest;
+                        THRsquares_monitor.IsBackground = true;
+                        Interlocked.Increment(ref squares_monitor_session_id);
                         THRsquares_monitor.Start();
                         i = 0;
 
@@ -626,18 +714,8 @@ namespace Clickless_Mouse
                 }
                 else if (i > loops_to_start_mouse_movement && squares_visible)
                 {
-                    THRsquares_monitor.Abort();
-                    squares_visible = false;
-                    if (SL_enabled)
-                        show_SL(false);
-                    if (SR_enabled)
-                        show_SR(false);
-                    if (SM_enabled)
-                        show_SM(false);
-                    if (SLH_enabled)
-                        show_SLH(false);
-                    if (SRH_enabled)
-                        show_SRH(false);
+                    cancel_square_monitor();
+                    hide_all_squares();
                     i = 0;
                     banned_x = x;
                     banned_y = y;
@@ -647,12 +725,14 @@ namespace Clickless_Mouse
 
         void monitor_squares()
         {
+            int session_id = squares_monitor_session_id;
             int i_SL = 0, i_SR = 0, i_SM = 0, i_SLH = 0, i_SRH = 0;
             int i_max = cursor_time_in_square_ms / loop_time_ms;
             int pos_x, pos_y;
 
             while (i_SL < i_max && i_SR < i_max && i_SM < i_max
-                && i_SLH < i_max && i_SRH < i_max && squares_visible)
+                && i_SLH < i_max && i_SRH < i_max && squares_visible
+                && is_shutting_down == false && session_id == squares_monitor_session_id)
             {
                 pos_x = System.Windows.Forms.Cursor.Position.X;
                 pos_y = System.Windows.Forms.Cursor.Position.Y;
@@ -699,85 +779,40 @@ namespace Clickless_Mouse
                 }
                 Thread.Sleep(loop_time_ms);
             }
+            if (is_shutting_down || session_id != squares_monitor_session_id || squares_visible == false)
+            {
+                return;
+            }
+
             if (i_SL >= i_max)
             {
                 LMBClick(x, y, 100);
-                if (SL_enabled)
-                    show_SL(false);
-                if (SR_enabled)
-                    show_SR(false);
-                if (SM_enabled)
-                    show_SM(false);
-                if (SLH_enabled)
-                    show_SLH(false);
-                if (SRH_enabled)
-                    show_SRH(false);
+                hide_all_squares();
                 last_click_time = DateTime.Now;
-                squares_visible = false;
             }
             else if (i_SR >= i_max)
             {
                 RMBClick(x, y, 100);
-                if (SL_enabled)
-                    show_SL(false);
-                if (SR_enabled)
-                    show_SR(false);
-                if (SM_enabled)
-                    show_SM(false);
-                if (SLH_enabled)
-                    show_SLH(false);
-                if (SRH_enabled)
-                    show_SRH(false);
+                hide_all_squares();
                 last_click_time = DateTime.Now;
-                squares_visible = false;
             }
             else if (i_SM >= i_max)
             {
                 DLMBClick(x, y, 100);
-                if (SL_enabled)
-                    show_SL(false);
-                if (SR_enabled)
-                    show_SR(false);
-                if (SM_enabled)
-                    show_SM(false);
-                if (SLH_enabled)
-                    show_SLH(false);
-                if (SRH_enabled)
-                    show_SRH(false);
+                hide_all_squares();
                 last_click_time = DateTime.Now;
-                squares_visible = false;
             }
-            if (i_SLH >= i_max)
+            else if (i_SLH >= i_max)
             {
                 LMBHold(x, y, 100);
-                if (SL_enabled)
-                    show_SL(false);
-                if (SR_enabled)
-                    show_SR(false);
-                if (SM_enabled)
-                    show_SM(false);
-                if (SLH_enabled)
-                    show_SLH(false);
-                if (SRH_enabled)
-                    show_SRH(false);
+                hide_all_squares();
                 last_click_time = DateTime.Now;
-                squares_visible = false;
             }
             else if (i_SRH >= i_max)
             {
                 RMBHold(x, y, 100);
-                if (SL_enabled)
-                    show_SL(false);
-                if (SR_enabled)
-                    show_SR(false);
-                if (SM_enabled)
-                    show_SM(false);
-                if (SLH_enabled)
-                    show_SLH(false);
-                if (SRH_enabled)
-                    show_SRH(false);
+                hide_all_squares();
                 last_click_time = DateTime.Now;
-                squares_visible = false;
             }
         }
 
@@ -789,19 +824,31 @@ namespace Clickless_Mouse
                     y1 = System.Windows.Forms.Cursor.Position.Y;
                 if (is_cursor_outside_zone(x1, y1))
                 {
-                    if (SL_enabled)
-                        show_SL(false);
-                    if (SR_enabled)
-                        show_SR(false);
-                    if (SM_enabled)
-                        show_SM(false);
-                    if (SLH_enabled)
-                        show_SLH(false);
-                    if (SRH_enabled)
-                        show_SRH(false);
-                    squares_visible = false;
+                    cancel_square_monitor();
+                    hide_all_squares();
                 }
             }
+        }
+
+        void hide_all_squares()
+        {
+            squares_visible = false;
+
+            if (SL_enabled)
+                show_SL(false);
+            if (SR_enabled)
+                show_SR(false);
+            if (SM_enabled)
+                show_SM(false);
+            if (SLH_enabled)
+                show_SLH(false);
+            if (SRH_enabled)
+                show_SRH(false);
+        }
+
+        void cancel_square_monitor()
+        {
+            Interlocked.Increment(ref squares_monitor_session_id);
         }
 
         bool is_cursor_in_SL(int x1, int y1)
@@ -1030,6 +1077,100 @@ namespace Clickless_Mouse
 
         delegate void Callback2();
 
+        delegate void HoldIndicatorPositionCallback(int cursorX, int cursorY);
+
+        void regenerate_hold_indicator()
+        {
+            if (holdIndicator != null && holdIndicator.InvokeRequired)
+            {
+                try
+                {
+                    Callback2 d = new Callback2(regenerate_hold_indicator);
+                    holdIndicator.Invoke(d, new object[] { });
+                }
+                catch (ObjectDisposedException)
+                {
+                    //
+                }
+            }
+            else
+            {
+                if (holdIndicator != null)
+                {
+                    holdIndicator.Dispose();
+                }
+
+                holdIndicator = new HoldIndicator(hold_indicator_diameter, System.Drawing.Color.Red);
+                holdIndicator.Show();
+                holdIndicator.Hide();
+            }
+        }
+
+        void show_hold_indicator(bool show)
+        {
+            if (holdIndicator == null)
+            {
+                return;
+            }
+
+            if (holdIndicator.InvokeRequired)
+            {
+                try
+                {
+                    Callback1 d = new Callback1(show_hold_indicator);
+                    holdIndicator.Invoke(d, new object[] { show });
+                }
+                catch (ObjectDisposedException)
+                {
+                    //
+                }
+            }
+            else
+            {
+                if (show)
+                {
+                    holdIndicator.Show();
+                }
+                else
+                {
+                    holdIndicator.Hide();
+                }
+            }
+        }
+
+        void update_hold_indicator_position(int cursorX, int cursorY)
+        {
+            if (holdIndicator == null)
+            {
+                return;
+            }
+
+            if (holdIndicator.InvokeRequired)
+            {
+                try
+                {
+                    HoldIndicatorPositionCallback d = new HoldIndicatorPositionCallback(update_hold_indicator_position);
+                    holdIndicator.Invoke(d, new object[] { cursorX, cursorY });
+                }
+                catch (ObjectDisposedException)
+                {
+                    //
+                }
+            }
+            else
+            {
+                holdIndicator.Location = new System.Drawing.Point(
+                    cursorX + hold_indicator_offset_x,
+                    cursorY + hold_indicator_offset_y);
+            }
+        }
+
+        void sync_hold_indicator_visibility()
+        {
+            show_hold_indicator((app_left_hold_active && show_left_hold_indicator)
+                || (app_right_hold_active && show_right_hold_indicator));
+        }
+
         void regenerate_SL()
         {
             if (SL != null && SL.InvokeRequired)
@@ -1199,16 +1340,45 @@ namespace Clickless_Mouse
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            if (is_shutting_down)
+            {
+                return;
+            }
+
+            e.Cancel = true;
             MIexit_Click(null, null);
         }
 
         private void MIexit_Click(object sender, RoutedEventArgs e)
         {
+            if (is_shutting_down)
+            {
+                return;
+            }
+
+            is_shutting_down = true;
+            screen_panning = false;
+            cancel_square_monitor();
+            hide_all_squares();
+            show_hold_indicator(false);
             ni.Visible = false;
             ni.Dispose();
 
             release_buttons_and_keys();
-            Process.GetCurrentProcess().Kill();
+
+            if (wm.IsVisible)
+            {
+                wm.Close();
+            }
+
+            if (holdIndicator != null)
+            {
+                holdIndicator.Dispose();
+                holdIndicator = null;
+            }
+
+            this.Close();
+            System.Windows.Application.Current.Shutdown();
         }
 
         private void MIdefault_colors_Click(object sender, RoutedEventArgs e)
@@ -1277,6 +1447,13 @@ namespace Clickless_Mouse
             save_settings();
         }
 
+        private void MIchinese_Click(object sender, RoutedEventArgs e)
+        {
+            lang = language.zh;
+            change_language(lang);
+            save_settings();
+        }
+
         private void MImanual_Click(object sender, RoutedEventArgs e)
         {
             wm.Show();
@@ -1292,7 +1469,7 @@ namespace Clickless_Mouse
 
                 latest_version = content.Replace("\r\n", "").Trim();
             }
-            catch (WebException we)
+            catch (WebException)
             {
                 latest_version = "unknown";
             }
@@ -1301,17 +1478,21 @@ namespace Clickless_Mouse
             {
                 WindowAbout w = new WindowAbout();
 
+                w.Title = about_title;
                 w.Lprogram_name.Content = prog_name;
-                w.Llatest_version.Content = "Latest version: " + latest_version;
-                w.Linstalled_version.Content = "Installed version: " + prog_version;
+                w.Llatest_version.Content = about_latest_version + latest_version;
+                w.Linstalled_version.Content = about_installed_version + prog_version;
+                w.Lhomepage2.Content = about_homepage;
+                w.Bchangelog.Content = about_changelog;
+                w.Beula.Content = about_eula;
                 w.Lhomepage.Content = url_homepage;
                 w.Lcopyright.Content = copyright_text;
-                
+
                 w.Show();
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show(ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show(ex.Message, error_title, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1429,16 +1610,17 @@ namespace Clickless_Mouse
         {
             if (CHBscreen_panning.IsChecked == true && THRmouse_monitor2 == null)
             {
+                screen_panning = true;
                 THRmouse_monitor2 = new Thread(new ThreadStart(monitor_mouse2));
                 THRmouse_monitor2.Priority = ThreadPriority.Highest;
+                THRmouse_monitor2.IsBackground = true;
                 THRmouse_monitor2.Start();
-                screen_panning = true;
             }
             else if (CHBscreen_panning.IsChecked == false && THRmouse_monitor2 != null)
             {
                 screen_panning = false;
-                THRmouse_monitor2.Abort();
                 THRmouse_monitor2 = null;
+                release_directional_keys();
             }
 
             if (saving_enabled)
@@ -1449,9 +1631,41 @@ namespace Clickless_Mouse
 
         private void CHBcheck_for_updates_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if((bool)CHBcheck_for_updates.IsChecked)
+            if ((bool)CHBcheck_for_updates.IsChecked && suppress_automatic_update_check == false)
             {
-                update_app_if_necessary();
+                start_update_check();
+            }
+
+            if (saving_enabled)
+            {
+                save_settings();
+            }
+        }
+
+        private void CHBlmb_hold_release_after_stop_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            should_release_lmb_hold_after_next_stop =
+                CHBlmb_hold_release_after_stop.IsChecked == true;
+
+            if (should_release_lmb_hold_after_next_stop == false)
+            {
+                app_left_hold_waiting_for_release_after_move = false;
+            }
+
+            if (saving_enabled)
+            {
+                save_settings();
+            }
+        }
+
+        private void CHBrmb_hold_release_after_stop_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            should_release_rmb_hold_after_next_stop =
+                CHBrmb_hold_release_after_stop.IsChecked == true;
+
+            if (should_release_rmb_hold_after_next_stop == false)
+            {
+                app_right_hold_waiting_for_release_after_move = false;
             }
 
             if (saving_enabled)
@@ -1482,6 +1696,42 @@ namespace Clickless_Mouse
                         cursor_idle_time_ms = lowest_cursor_idle_time_ms;
                         loops_to_show_squares_after_cursor_idle =
                             (int)Math.Round((double)(lowest_cursor_idle_time_ms / loop_time_ms));
+                    }
+
+                    if (saving_enabled)
+                    {
+                        save_settings();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show(ex.Message, error_title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void TBhold_release_delay_after_stop_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            try
+            {
+                if (TBhold_release_delay_after_stop.Text.Length > 0)
+                {
+                    int x = int.Parse(TBhold_release_delay_after_stop.Text);
+                    if (x < 1)
+                    {
+                        TBhold_release_delay_after_stop.Text = "1";
+                        throw new Exception(hold_release_delay_after_stop_error + "1 ms.");
+                    }
+
+                    hold_release_delay_after_stop_ms = x;
+                    loops_to_release_hold_after_stop = (int)Math.Round(
+                        (double)hold_release_delay_after_stop_ms / loop_time_ms);
+
+                    if (hold_release_delay_after_stop_ms < lowest_hold_release_delay_after_stop_ms)
+                    {
+                        hold_release_delay_after_stop_ms = lowest_hold_release_delay_after_stop_ms;
+                        loops_to_release_hold_after_stop = (int)Math.Round(
+                            (double)lowest_hold_release_delay_after_stop_ms / loop_time_ms);
                     }
 
                     if (saving_enabled)
@@ -1883,6 +2133,9 @@ namespace Clickless_Mouse
                 sw.WriteLine(TBmin_square_size.Text);                
 
                 sw.WriteLine(TBscreen_size.Text);
+                sw.WriteLine(CHBlmb_hold_release_after_stop.IsChecked);
+                sw.WriteLine(CHBrmb_hold_release_after_stop.IsChecked);
+                sw.WriteLine(TBhold_release_delay_after_stop.Text);
 
                 sw.WriteLine(lang.ToString());
 
@@ -1916,6 +2169,8 @@ namespace Clickless_Mouse
             {
                 if (File.Exists(file_path))
                 {
+                    suppress_automatic_update_check = true;
+
                     //Checkboxes Checked and Unchecked events work only after form is loaded
                     //so they have to be called manually in order to load save data properly
                     CHBLMB_CheckedChanged(null, null);
@@ -1975,19 +2230,69 @@ namespace Clickless_Mouse
                     TBmin_square_size.Text = sr.ReadLine();
                     TBscreen_size.Text = sr.ReadLine();
 
-                    Enum.TryParse(sr.ReadLine(), out lang);
+                    string hold_release_or_lang = sr.ReadLine();
+                    bool hold_release_value = false;
+
+                    if (bool.TryParse(hold_release_or_lang, out hold_release_value))
+                    {
+                        CHBlmb_hold_release_after_stop.IsChecked = hold_release_value;
+                        should_release_lmb_hold_after_next_stop = hold_release_value;
+                        string right_hold_release_or_delay_or_lang = sr.ReadLine();
+                        bool right_hold_release_value = false;
+
+                        if (bool.TryParse(right_hold_release_or_delay_or_lang, out right_hold_release_value))
+                        {
+                            CHBrmb_hold_release_after_stop.IsChecked = right_hold_release_value;
+                            should_release_rmb_hold_after_next_stop = right_hold_release_value;
+
+                            string hold_release_delay_or_lang = sr.ReadLine();
+                            int hold_release_delay_value = 0;
+
+                            if (int.TryParse(hold_release_delay_or_lang, out hold_release_delay_value))
+                            {
+                                TBhold_release_delay_after_stop.Text = hold_release_delay_value.ToString();
+                                Enum.TryParse(sr.ReadLine(), out lang);
+                            }
+                            else
+                            {
+                                TBhold_release_delay_after_stop.Text =
+                                    default_hold_release_delay_after_stop_ms.ToString();
+                                Enum.TryParse(hold_release_delay_or_lang, out lang);
+                            }
+                        }
+                        else
+                        {
+                            CHBrmb_hold_release_after_stop.IsChecked = true;
+                            should_release_rmb_hold_after_next_stop = true;
+                            TBhold_release_delay_after_stop.Text =
+                                default_hold_release_delay_after_stop_ms.ToString();
+                            Enum.TryParse(right_hold_release_or_delay_or_lang, out lang);
+                        }
+                    }
+                    else
+                    {
+                        CHBlmb_hold_release_after_stop.IsChecked = true;
+                        should_release_lmb_hold_after_next_stop = true;
+                        CHBrmb_hold_release_after_stop.IsChecked = true;
+                        should_release_rmb_hold_after_next_stop = true;
+                        TBhold_release_delay_after_stop.Text =
+                            default_hold_release_delay_after_stop_ms.ToString();
+                        Enum.TryParse(hold_release_or_lang, out lang);
+                    }
 
                     if(sr.EndOfStream == false) //support old settings file
                     {
                         CHBcheck_for_updates.IsChecked = bool.Parse(sr.ReadLine());
                     }
 
+                    suppress_automatic_update_check = false;
                     sr.Close();
                     fs.Close();
                 }
             }
             catch (Exception ex)
             {
+                suppress_automatic_update_check = false;
                 loading_error = true;
                 System.Windows.Forms.MessageBox.Show(ex.Message + loading_error_msg, error_title, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
@@ -2000,6 +2305,13 @@ namespace Clickless_Mouse
                 }
                 catch (Exception ex2) { }
             }
+        }
+
+        void start_update_check()
+        {
+            Thread thr = new Thread(new ThreadStart(update_app_if_necessary));
+            thr.IsBackground = true;
+            thr.Start();
         }
 
         void update_app_if_necessary()
@@ -2027,17 +2339,31 @@ namespace Clickless_Mouse
 
             if ((bool)CHBcheck_for_updates.IsChecked && update_available)
             {
-                MessageBoxResult dialogResult = System.Windows.MessageBox.Show("A new program version" +
-                    " is available. Do you want to download it now?",
-                //    " is available. Do you want to perform an automatic update now?",
-                    "New Version Available", MessageBoxButton.YesNo, MessageBoxImage.Question);
-
-                if (dialogResult == MessageBoxResult.Yes)
+                this.Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    //Open download page
-                    Process.Start("https://" + url_homepage);
-                }
+                    if ((bool)CHBcheck_for_updates.IsChecked == false || is_shutting_down)
+                    {
+                        return;
+                    }
+
+                    MessageBoxResult dialogResult = System.Windows.MessageBox.Show("A new program version" +
+                        " is available. Do you want to download it now?",
+                        "New Version Available", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+                    if (dialogResult == MessageBoxResult.Yes)
+                    {
+                        Process.Start("https://" + url_homepage);
+                    }
+                }));
             }
+        }
+
+        void release_directional_keys()
+        {
+            key_up(VirtualKeyCode.LEFT);
+            key_up(VirtualKeyCode.RIGHT);
+            key_up(VirtualKeyCode.UP);
+            key_up(VirtualKeyCode.DOWN);
         }
 
         private class MyWebClient : WebClient
