@@ -9,6 +9,15 @@ Version in this repository: `2.2`
 
 **Languages:** English, Polish, Chinese
 
+## Differences From The Original Project
+
+This repository is not a plain mirror of the upstream `ProperCode/Clickless-Mouse` release. Compared with the original project, the current version in this repository emphasizes:
+- Added Chinese UI and Chinese user-guide text.
+- Added a Chinese README for local users.
+- Added configurable auto-release behavior for left and right mouse-button hold actions after a short stop.
+- Added a small red hold-state overlay indicator.
+- Cleaned tracked Visual Studio and build-output artifacts from the repository and added ignore rules for future builds.
+
 ## Description
 
 Clickless Mouse is a Windows desktop application for using a mouse without physical clicking. It is intended for people with repetitive strain injury, carpal tunnel syndrome, some motor disabilities, or temporary mouse-button failure.
