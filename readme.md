@@ -5,7 +5,7 @@
 ## Download
 [Download latest version](https://github.com/ProperCode/Clickless-Mouse/releases)
 
-Version in this repository: `2.2`
+Version in this repository: `2.2.1`
 
 **Languages:** English, Polish, Chinese
 
@@ -40,7 +40,7 @@ Additional behavior in the current codebase:
 - Screen panning can map screen edges to arrow-key presses.
 - Left and right button hold actions can be configured to release automatically after the cursor stops for a short time.
 - A small red overlay dot indicates when the app is currently holding a mouse button down.
-- Automatic update checks are available in version `2.2`.
+- Automatic update checks are available in version `2.2.1`.
 - The app works only in windowed or borderless applications. Exclusive fullscreen is not supported.
 
 ## First Use
@@ -62,7 +62,7 @@ Lowest accepted values enforced by the program:
 
 - Windows
 - .NET Framework `4.5.2`
-- Administrator rights when running version `2.2`
+- Administrator rights when running version `2.2.1`
 
 Settings are stored next to the executable in `settings.txt`. Enabling startup also generates a sibling `.vbs` launcher used by the app's autorun entry.
 

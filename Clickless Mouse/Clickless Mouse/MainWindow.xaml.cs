@@ -75,7 +75,7 @@ namespace Clickless_Mouse
         //----------------------------------
 
         const string prog_name = "Clickless Mouse";
-        const string prog_version = "2.2";
+        const string prog_version = "2.2.1";
         const string url_latest_version = "https://raw.githubusercontent.com/ProperCode/Clickless-Mouse/master/other/latest_version.txt";
         const string url_homepage = "github.com/ProperCode/Clickless-Mouse";
         string latest_version = "";

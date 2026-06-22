@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Clickless Mouse is a Windows WPF application targeting `.NET Framework 4.5.2`. The current source version is `2.2`.
+Clickless Mouse is a Windows WPF application targeting `.NET Framework 4.5.2`. The current source version is `2.2.1`.
 
 ## Repository Layout
 
@@ -20,7 +20,7 @@ Clickless Mouse is a Windows WPF application targeting `.NET Framework 4.5.2`. T
 
 - The app stores settings beside the executable in `settings.txt`.
 - Enabling startup writes a `Run` registry entry and generates a sibling `.vbs` launcher.
-- Version `2.2` includes update checks and documents administrator-rights requirement in the changelog.
+- Version `2.2.1` includes update checks and documents administrator-rights requirement in the changelog.
 - The UI now supports English, Polish, and Chinese, with startup language chosen from the installed UI culture.
 - LMB and RMB hold actions can auto-release after a configurable stop delay, and the app shows a red overlay indicator while a hold is active.
 - `settings.txt` loading is backward-compatible with older layouts and falls back to defaults for newly added hold-release fields.
