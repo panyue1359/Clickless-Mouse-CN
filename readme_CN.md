@@ -1,5 +1,7 @@
 # Clickless Mouse
 
+[English README](./readme.md)
+
 ## 下载
 [下载最新版本](https://github.com/ProperCode/Clickless-Mouse/releases)
 
